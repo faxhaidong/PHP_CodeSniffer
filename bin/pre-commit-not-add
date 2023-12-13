@@ -1,0 +1,93 @@
+#!/bin/bash
+#不自动add
+#source /usr/local/opt/php@8.0/bin/php
+PHPCS_BIN=/Users/chenhaidong/work/server/php_codesniffer/bin/phpcs
+PHPCBF_BIN=/Users/chenhaidong/work/server/php_codesniffer/bin/phpcbf
+PHPCS_IGNORE=
+PHPCS_IGNORE_WARNINGS=1
+TMP_STAGING=".tmpfile"
+
+if [ ! -x $PHPCS_BIN ]; then
+    echo "PHP CodeSniffer bin not found or executable -> $PHPCS_BIN"
+    exit 1
+fi
+
+if git rev-parse --verify HEAD
+then
+    against=HEAD
+else
+    against=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+fi
+
+FILES=$(git diff-index --name-only --cached --diff-filter=ACMR $against -- )
+
+if [ "$FILES" == "" ]; then
+    exit 0
+fi
+
+if [ -e $TMP_STAGING ]; then
+    rm -rf $TMP_STAGING
+fi
+mkdir $TMP_STAGING
+
+FILES_TO_CHECK=""
+for FILE in $FILES
+do
+    echo "$FILE" | egrep -q "$PHPCS_FILE_PATTERN"
+    RETVAL=$?
+    if [ "$RETVAL" -eq "0" ]
+    then
+        FILES_TO_CHECK="$FILES_TO_CHECK $FILE"
+    fi
+done
+
+if [ "$FILES_TO_CHECK" == "" ]; then
+    exit 0
+fi
+
+if [ "$PHPCS_IGNORE" != "" ]; then
+    IGNORE="--ignore=$PHPCS_IGNORE"
+else
+    IGNORE=""
+fi
+
+if [ "$PHPCS_SNIFFS" != "" ]; then
+    SNIFFS="--sniffs=$PHPCS_SNIFFS"
+else
+    SNIFFS=""
+fi
+
+if [ "$PHPCS_ENCODING" != "" ]; then
+    ENCODING="--encoding=$PHPCS_ENCODING"
+else
+    ENCODING=""
+fi
+
+if [ "$PHPCS_IGNORE_WARNINGS" == "1" ]; then
+    IGNORE_WARNINGS="-n"
+else
+    IGNORE_WARNINGS=""
+fi
+
+STAGED_FILES=""
+STAGED_SOURCE_FILES=""
+for FILE in $FILES_TO_CHECK
+do
+  ID=$(git diff-index --cached $against $FILE | cut -d " " -f4)
+
+  mkdir -p "$TMP_STAGING/$(dirname $FILE)"
+  git cat-file blob $ID > "$TMP_STAGING/$FILE"
+  STAGED_FILES="$STAGED_FILES $TMP_STAGING/$FILE"
+  STAGED_SOURCE_FILES="$STAGED_SOURCE_FILES $FILE"
+done
+$PHPCBF_BIN $STAGED_SOURCE_FILES
+OUTPUT=$($PHPCS_BIN -s $IGNORE_WARNINGS $ENCODING $IGNORE $SNIFFS $STAGED_FILES)
+RETVAL=$?
+
+rm -rf $TMP_STAGING
+
+if [ $RETVAL -ne 0 ]; then
+    echo "$OUTPUT"
+fi
+
+exit $RETVAL
